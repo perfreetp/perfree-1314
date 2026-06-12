@@ -1,0 +1,76 @@
+# Dependencies
+node_modules/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+*.tsbuildinfo*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+*.lcov
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Database
+*.sqlite
+*.sqlite3
+
+# Uploads
+uploads/
+public/uploads/
+
+# >>> auto_trae 大文件兜底忽略（自动追加，勿删）>>>
+release/
+releases/
+dist_electron/
+dist-electron/
+app-builds/
+src-tauri/target/
+node_modules/
+*.asar
+*.dmg
+*.pkg
+*.msi
+*.msix
+*.appx
+*.AppImage
+*.deb
+*.rpm
+*.snap
+*.blockmap
+*.exe
+*.dll
+*.dylib
+*.node
+*.zip
+*.7z
+*.iso
+# <<< auto_trae 大文件兜底忽略 <<<
