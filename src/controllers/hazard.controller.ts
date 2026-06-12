@@ -32,7 +32,8 @@ export async function deleteHazard(req: Request, res: Response) {
   if (!id) {
     throwApiError("隐患ID不能为空", 400);
   }
-  await hazardService.deleteHazardPoint(id);
+  const userId = (req as any).user?.id;
+  await hazardService.deleteHazardPoint(id, userId);
   return successResponse(res, null, "隐患删除成功");
 }
 
@@ -48,6 +49,7 @@ export async function listHazards(req: Request, res: Response) {
     isRepaired: req.query.isRepaired !== undefined ? req.query.isRepaired === "true" : undefined,
     code: req.query.code as string,
     title: req.query.title as string,
+    sharingLevel: req.query.sharingLevel as any,
   };
 
   const result = await hazardService.listHazardPoints(filters);

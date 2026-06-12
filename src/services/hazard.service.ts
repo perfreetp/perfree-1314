@@ -1,10 +1,11 @@
 import { AppDataSource } from "../config/data-source";
 import { HazardPoint } from "../entities/HazardPoint.entity";
 import { WorkOrder } from "../entities/WorkOrder.entity";
-import { HazardType, RiskLevel } from "../types/enums";
+import { HazardType, RiskLevel, ChangeType, SharingLevel } from "../types/enums";
 import { throwApiError } from "../utils/response";
 import { PaginationParams, getPaginationOptions, paginateQuery } from "../utils/pagination";
 import { parseGeometry } from "../utils/spatial";
+import * as changeHistoryService from "./changeHistory.service";
 
 export interface CreateHazardPointDto {
   code: string;
@@ -30,6 +31,7 @@ export interface CreateHazardPointDto {
   repairWorkOrderId?: string;
   images?: string[];
   attributes?: Record<string, any>;
+  sharingLevel?: SharingLevel;
   remarks?: string;
 }
 
@@ -44,6 +46,7 @@ export interface HazardListFilters extends PaginationParams {
   isRepaired?: boolean;
   code?: string;
   title?: string;
+  sharingLevel?: SharingLevel;
 }
 
 export interface AnnotateHazardDto {
@@ -135,7 +138,20 @@ export async function createHazardPoint(
     updatedBy: userId,
   });
 
-  return await hazardRepository.save(hazard);
+  const saved = await hazardRepository.save(hazard);
+
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "hazard",
+      entityId: saved.id,
+      changeType: ChangeType.CREATE,
+      newEntity: saved,
+      operatorId: userId,
+      changeReason: "创建隐患",
+    });
+  } catch {}
+
+  return saved;
 }
 
 export async function getHazardPoint(id: string): Promise<HazardPoint> {
@@ -155,6 +171,7 @@ export async function updateHazardPoint(
   userId?: string
 ): Promise<HazardPoint> {
   const hazard = await getHazardPoint(id);
+  const oldEntity = { ...hazard };
 
   if (dto.code && dto.code !== hazard.code) {
     const existing = await hazardRepository.findOne({ where: { code: dto.code } });
@@ -186,12 +203,38 @@ export async function updateHazardPoint(
     updatedBy: userId,
   });
 
-  return await hazardRepository.save(updated);
+  const saved = await hazardRepository.save(updated);
+
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "hazard",
+      entityId: saved.id,
+      changeType: ChangeType.UPDATE,
+      oldEntity,
+      newEntity: saved,
+      operatorId: userId,
+      changeReason: "更新隐患",
+    });
+  } catch {}
+
+  return saved;
 }
 
-export async function deleteHazardPoint(id: string): Promise<void> {
+export async function deleteHazardPoint(id: string, userId?: string): Promise<void> {
   const hazard = await getHazardPoint(id);
+  const oldEntity = { ...hazard };
   await hazardRepository.softDelete(hazard.id);
+
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "hazard",
+      entityId: id,
+      changeType: ChangeType.DELETE,
+      oldEntity,
+      operatorId: userId,
+      changeReason: "删除隐患",
+    });
+  } catch {}
 }
 
 export async function listHazardPoints(filters: HazardListFilters) {
@@ -218,6 +261,8 @@ export async function listHazardPoints(filters: HazardListFilters) {
   if (queryFilters.code) qb.andWhere("hazard.code = :code", { code: queryFilters.code });
   if (queryFilters.title)
     qb.andWhere("hazard.title ILIKE :title", { title: `%${queryFilters.title}%` });
+  if (queryFilters.sharingLevel)
+    qb.andWhere("hazard.sharingLevel = :sharingLevel", { sharingLevel: queryFilters.sharingLevel });
 
   return await paginateQuery(qb, { page, pageSize });
 }

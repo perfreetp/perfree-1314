@@ -59,7 +59,8 @@ export async function updateWorkOrderHandler(req: Request, res: Response) {
 
 export async function deleteWorkOrderHandler(req: Request, res: Response) {
   const { id } = req.params;
-  await deleteWorkOrder(id);
+  const userId = (req as any).user?.id;
+  await deleteWorkOrder(id, userId);
   return successResponse(res, null, "工单删除成功");
 }
 
@@ -81,6 +82,7 @@ export async function listWorkOrdersHandler(req: Request, res: Response) {
     endTime: req.query.endTime
       ? new Date(req.query.endTime as string)
       : undefined,
+    sharingLevel: req.query.sharingLevel as any,
   };
   const result = await listWorkOrders(filters);
   return successResponse(res, result.data, "查询成功", {

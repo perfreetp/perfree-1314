@@ -160,31 +160,42 @@ export async function deleteExcavation(id: string): Promise<void> {
   await excavationRepository.softDelete(application.id);
 }
 
-export async function listExcavations(filters: ExcavationListFilters) {
-  const { page, pageSize, ...queryFilters } = filters;
-  const where: any = {};
-
-  if (queryFilters.status) where.status = queryFilters.status;
-  if (queryFilters.applicantDepartmentId) where.applicantDepartmentId = queryFilters.applicantDepartmentId;
-  if (queryFilters.hasConflict !== undefined) where.hasConflict = queryFilters.hasConflict;
-
+export function buildExcavationQueryBuilder(filters: ExcavationListFilters) {
   const qb = excavationRepository
     .createQueryBuilder("excavation")
     .leftJoinAndSelect("excavation.applicantDepartment", "applicantDepartment")
     .leftJoinAndSelect("excavation.applicant", "applicant")
     .leftJoinAndSelect("excavation.reviewer", "reviewer");
 
-  if (queryFilters.projectName) {
+  if (filters.status) {
+    qb.andWhere("excavation.status = :status", { status: filters.status });
+  }
+  if (filters.applicantDepartmentId) {
+    qb.andWhere("excavation.applicantDepartmentId = :applicantDepartmentId", {
+      applicantDepartmentId: filters.applicantDepartmentId,
+    });
+  }
+  if (filters.hasConflict !== undefined && filters.hasConflict !== null) {
+    qb.andWhere("excavation.hasConflict = :hasConflict", { hasConflict: filters.hasConflict });
+  }
+  if (filters.projectName) {
     qb.andWhere("excavation.projectName ILIKE :projectName", {
-      projectName: `%${queryFilters.projectName}%`,
+      projectName: `%${filters.projectName}%`,
+    });
+  }
+  if (filters.applicationNo) {
+    qb.andWhere("excavation.applicationNo ILIKE :applicationNo", {
+      applicationNo: `%${filters.applicationNo}%`,
     });
   }
 
-  if (queryFilters.applicationNo) {
-    qb.andWhere("excavation.applicationNo ILIKE :applicationNo", {
-      applicationNo: `%${queryFilters.applicationNo}%`,
-    });
-  }
+  qb.orderBy("excavation.createdAt", "DESC");
+  return qb;
+}
+
+export async function listExcavations(filters: ExcavationListFilters) {
+  const { page, pageSize } = filters;
+  const qb = buildExcavationQueryBuilder(filters);
 
   const { skip, take, page: currentPage, pageSize: size } = getPaginationOptions({
     page,

@@ -3,7 +3,7 @@ import { Alert } from "../entities/Alert.entity";
 import { Sensor } from "../entities/Sensor.entity";
 import { SensorReading } from "../entities/SensorReading.entity";
 import { WorkOrder } from "../entities/WorkOrder.entity";
-import { AlertType, AlertSeverity, AlertStatus, SensorType, WorkOrderPriority, WorkOrderStatus } from "../types/enums";
+import { AlertType, AlertSeverity, AlertStatus, SensorType, WorkOrderPriority, WorkOrderStatus, SharingLevel } from "../types/enums";
 import { throwApiError } from "../utils/response";
 import { PaginationParams, paginateQuery, getPaginationOptions } from "../utils/pagination";
 import { ThresholdCheckResult } from "./sensor.service";
@@ -22,6 +22,7 @@ export interface CreateAlertDto {
   timestamp?: Date;
   location?: any;
   attributes?: Record<string, any>;
+  sharingLevel?: SharingLevel;
 }
 
 export interface UpdateAlertDto extends Partial<CreateAlertDto> {}
@@ -33,6 +34,7 @@ export interface AlertListFilters extends PaginationParams {
   sensorId?: string;
   startTime?: Date;
   endTime?: Date;
+  sharingLevel?: SharingLevel;
 }
 
 export interface AlertStatistics {
@@ -149,6 +151,9 @@ export async function listAlerts(filters: AlertListFilters) {
     qb.andWhere("alert.timestamp >= :startTime", { startTime: queryFilters.startTime });
   } else if (queryFilters.endTime) {
     qb.andWhere("alert.timestamp <= :endTime", { endTime: queryFilters.endTime });
+  }
+  if (queryFilters.sharingLevel) {
+    qb.andWhere("alert.sharingLevel = :sharingLevel", { sharingLevel: queryFilters.sharingLevel });
   }
 
   return await paginateQuery(qb, { page, pageSize });

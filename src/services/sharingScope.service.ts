@@ -144,7 +144,14 @@ const ENTITY_REPOSITORIES: Record<string, any> = {
 };
 
 function getEntityIdField(entityType: string): keyof SharingScope {
-  return entityType === "pipeline" ? "pipelineId" : "facilityId";
+  const fieldMap: Record<string, keyof SharingScope> = {
+    pipeline: "pipelineId",
+    facility: "facilityId",
+    hazard: "hazardId",
+    workOrder: "workOrderId",
+    alert: "alertId",
+  };
+  return fieldMap[entityType] || "pipelineId";
 }
 
 async function getUserWithDepartment(userId: string): Promise<User | null> {
@@ -209,10 +216,9 @@ export async function createSharingScope(dto: CreateSharingScopeDto): Promise<Sh
     remarks: dto.remarks,
   };
 
-  if (entityType === "pipeline" && entityId) {
-    scopeData.pipelineId = entityId;
-  } else if (entityType === "facility" && entityId) {
-    scopeData.facilityId = entityId;
+  if (entityType && entityId) {
+    const idField = getEntityIdField(entityType);
+    (scopeData as any)[idField] = entityId;
   } else if (dto.pipelineId) {
     scopeData.pipelineId = dto.pipelineId;
   } else if (dto.facilityId) {
@@ -248,13 +254,8 @@ export async function updateSharingScope(
     if (!entity) {
       throwApiError(`实体不存在: ${entityType} - ${entityId}`, 404);
     }
-    if (entityType === "pipeline") {
-      (updateData as any).pipelineId = entityId;
-      (updateData as any).facilityId = null;
-    } else if (entityType === "facility") {
-      (updateData as any).facilityId = entityId;
-      (updateData as any).pipelineId = null;
-    }
+    const idField = getEntityIdField(entityType);
+    (updateData as any)[idField] = entityId;
   }
 
   const updated = sharingScopeRepository.merge(scope, updateData);
@@ -618,7 +619,12 @@ export async function getSharingStatistics(): Promise<SharingStatistics> {
 
   const entityTypeMap = new Map<string, { total: number; active: number }>();
   for (const scope of allScopes) {
-    const entityType = scope.pipelineId ? "pipeline" : scope.facilityId ? "facility" : "other";
+    let entityType = "other";
+    if (scope.pipelineId) entityType = "pipeline";
+    else if (scope.facilityId) entityType = "facility";
+    else if (scope.hazardId) entityType = "hazard";
+    else if (scope.workOrderId) entityType = "workOrder";
+    else if (scope.alertId) entityType = "alert";
     const existing = entityTypeMap.get(entityType) || { total: 0, active: 0 };
     existing.total++;
     if (activeScopes.includes(scope)) {

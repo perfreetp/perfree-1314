@@ -1,6 +1,6 @@
 import { Entity, Column, ManyToOne, JoinColumn, Index, OneToMany } from "typeorm";
 import { BaseEntity } from "./Base.entity";
-import { HazardType, RiskLevel } from "../types/enums";
+import { HazardType, RiskLevel, SharingLevel } from "../types/enums";
 import { Pipeline } from "./Pipeline.entity";
 import { Facility } from "./Facility.entity";
 import { Department } from "./Department.entity";
@@ -79,6 +79,9 @@ export class HazardPoint extends BaseEntity {
 
   @Column({ type: "jsonb", nullable: true })
   attributes: Record<string, any>;
+
+  @Column({ type: "enum", enum: SharingLevel, default: SharingLevel.PRIVATE })
+  sharingLevel: SharingLevel;
 
   @Column({ type: "text", nullable: true })
   remarks: string;

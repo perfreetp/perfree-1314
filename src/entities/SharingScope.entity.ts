@@ -2,16 +2,33 @@ import { Entity, Column, ManyToOne, JoinColumn, Index } from "typeorm";
 import { BaseEntity } from "./Base.entity";
 import { SharingLevel, PipelineType } from "../types/enums";
 import { Pipeline } from "./Pipeline.entity";
+import { Facility } from "./Facility.entity";
+import { HazardPoint } from "./HazardPoint.entity";
+import { WorkOrder } from "./WorkOrder.entity";
+import { Alert } from "./Alert.entity";
 import { Department } from "./Department.entity";
 
 @Entity("sharing_scopes")
 @Index(["pipelineId", "targetType", "targetId"])
+@Index(["facilityId", "targetType", "targetId"])
+@Index(["hazardId", "targetType", "targetId"])
+@Index(["workOrderId", "targetType", "targetId"])
+@Index(["alertId", "targetType", "targetId"])
 export class SharingScope extends BaseEntity {
   @Column({ type: "uuid", nullable: true })
   pipelineId: string;
 
   @Column({ type: "uuid", nullable: true })
   facilityId: string;
+
+  @Column({ type: "uuid", nullable: true })
+  hazardId: string;
+
+  @Column({ type: "uuid", nullable: true })
+  workOrderId: string;
+
+  @Column({ type: "uuid", nullable: true })
+  alertId: string;
 
   @Column({ type: "enum", enum: SharingLevel, default: SharingLevel.DEPARTMENT })
   sharingLevel: SharingLevel;
@@ -67,6 +84,22 @@ export class SharingScope extends BaseEntity {
   @ManyToOne(() => Pipeline, (pipeline) => pipeline.sharingScopes)
   @JoinColumn({ name: "pipelineId" })
   pipeline: Pipeline;
+
+  @ManyToOne(() => Facility)
+  @JoinColumn({ name: "facilityId" })
+  facility: Facility;
+
+  @ManyToOne(() => HazardPoint)
+  @JoinColumn({ name: "hazardId" })
+  hazard: HazardPoint;
+
+  @ManyToOne(() => WorkOrder)
+  @JoinColumn({ name: "workOrderId" })
+  workOrder: WorkOrder;
+
+  @ManyToOne(() => Alert)
+  @JoinColumn({ name: "alertId" })
+  alert: Alert;
 
   @ManyToOne(() => Department)
   @JoinColumn({ name: "targetId" })

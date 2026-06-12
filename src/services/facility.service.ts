@@ -1,11 +1,12 @@
 import { AppDataSource } from "../config/data-source";
 import { Facility } from "../entities/Facility.entity";
 import { WorkOrder } from "../entities/WorkOrder.entity";
-import { FacilityType, ValveStatus, WorkOrderStatus, PipelineType, ValveType, SharingLevel } from "../types/enums";
+import { FacilityType, ValveStatus, WorkOrderStatus, PipelineType, ValveType, SharingLevel, ChangeType } from "../types/enums";
 import { throwApiError } from "../utils/response";
 import { paginateRepository, PaginationParams } from "../utils/pagination";
 import { In, Between, FindOptionsWhere } from "typeorm";
 import { parseGeometry, pointInPolygon, calculateDistance } from "../utils/spatial";
+import * as changeHistoryService from "./changeHistory.service";
 
 const facilityRepository = AppDataSource.getRepository(Facility);
 const workOrderRepository = AppDataSource.getRepository(WorkOrder);
@@ -45,15 +46,32 @@ export interface GeometryQueryParams {
   relation?: "intersects" | "contains" | "within";
 }
 
-export async function createFacility(data: FacilityCreateData): Promise<Facility> {
+export async function createFacility(data: FacilityCreateData, userId?: string): Promise<Facility> {
   try {
     const existing = await facilityRepository.findOne({ where: { code: data.code } });
     if (existing) {
       throwApiError("设施编码已存在", 400);
     }
 
-    const facility = facilityRepository.create(data as any);
-    return await facilityRepository.save(facility) as any;
+    const facility = facilityRepository.create({
+      ...data,
+      createdBy: userId,
+      updatedBy: userId,
+    } as any);
+    const saved = await facilityRepository.save(facility) as any;
+
+    try {
+      await changeHistoryService.recordChange({
+        entityType: "facility",
+        entityId: saved.id,
+        changeType: ChangeType.CREATE,
+        newEntity: saved,
+        operatorId: userId,
+        changeReason: "创建设施",
+      });
+    } catch {}
+
+    return saved;
   } catch (error) {
     if (error instanceof Error && error.name === "ApiError") {
       throw error;
@@ -96,9 +114,10 @@ export async function getFacilities(
   }
 }
 
-export async function updateFacility(id: string, data: FacilityUpdateData): Promise<Facility> {
+export async function updateFacility(id: string, data: FacilityUpdateData, userId?: string): Promise<Facility> {
   try {
     const facility = await getFacilityById(id);
+    const oldEntity = { ...facility };
 
     if (data.code && data.code !== facility.code) {
       const existing = await facilityRepository.findOne({ where: { code: data.code } });
@@ -107,8 +126,25 @@ export async function updateFacility(id: string, data: FacilityUpdateData): Prom
       }
     }
 
-    facilityRepository.merge(facility, data as any);
-    return await facilityRepository.save(facility);
+    facilityRepository.merge(facility, {
+      ...data,
+      updatedBy: userId,
+    } as any);
+    const saved = await facilityRepository.save(facility);
+
+    try {
+      await changeHistoryService.recordChange({
+        entityType: "facility",
+        entityId: saved.id,
+        changeType: ChangeType.UPDATE,
+        oldEntity,
+        newEntity: saved,
+        operatorId: userId,
+        changeReason: "更新设施",
+      });
+    } catch {}
+
+    return saved;
   } catch (error) {
     if (error instanceof Error && error.name === "ApiError") {
       throw error;
@@ -117,10 +153,22 @@ export async function updateFacility(id: string, data: FacilityUpdateData): Prom
   }
 }
 
-export async function deleteFacility(id: string): Promise<void> {
+export async function deleteFacility(id: string, userId?: string): Promise<void> {
   try {
     const facility = await getFacilityById(id);
+    const oldEntity = { ...facility };
     await facilityRepository.remove(facility);
+
+    try {
+      await changeHistoryService.recordChange({
+        entityType: "facility",
+        entityId: id,
+        changeType: ChangeType.DELETE,
+        oldEntity,
+        operatorId: userId,
+        changeReason: "删除设施",
+      });
+    } catch {}
   } catch (error) {
     if (error instanceof Error && error.name === "ApiError") {
       throw error;

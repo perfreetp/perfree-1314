@@ -1,10 +1,11 @@
 import { AppDataSource } from "../config/data-source";
 import { Pipeline } from "../entities/Pipeline.entity";
 import { PipelineNode } from "../entities/PipelineNode.entity";
-import { PipelineType, PipelineStatus, PipelineMaterial, RiskLevel } from "../types/enums";
+import { PipelineType, PipelineStatus, PipelineMaterial, RiskLevel, ChangeType } from "../types/enums";
 import { throwApiError } from "../utils/response";
 import { PaginationParams } from "../utils/pagination";
 import { parseGeometry, nearestPointOnLine } from "../utils/spatial";
+import * as changeHistoryService from "./changeHistory.service";
 
 export interface CreatePipelineDto {
   code: string;
@@ -145,7 +146,20 @@ export async function createPipeline(dto: CreatePipelineDto, userId?: string): P
     type: pipeline.type,
   });
 
-  return await pipelineRepository.save(pipeline);
+  const saved = await pipelineRepository.save(pipeline);
+
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "pipeline",
+      entityId: saved.id,
+      changeType: ChangeType.CREATE,
+      newEntity: saved,
+      operatorId: userId,
+      changeReason: "新建管线",
+    });
+  } catch {}
+
+  return saved;
 }
 
 export async function getPipeline(id: string): Promise<Pipeline> {
@@ -165,6 +179,7 @@ export async function updatePipeline(
   userId?: string
 ): Promise<Pipeline> {
   const pipeline = await getPipeline(id);
+  const oldEntity = { ...pipeline };
 
   if (dto.code && dto.code !== pipeline.code) {
     const existing = await pipelineRepository.findOne({ where: { code: dto.code } });
@@ -203,45 +218,83 @@ export async function updatePipeline(
     type: updated.type,
   });
 
-  return await pipelineRepository.save(updated);
+  const saved = await pipelineRepository.save(updated);
+
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "pipeline",
+      entityId: saved.id,
+      changeType: ChangeType.UPDATE,
+      oldEntity,
+      newEntity: saved,
+      operatorId: userId,
+      changeReason: "更新管线",
+    });
+  } catch {}
+
+  return saved;
 }
 
-export async function deletePipeline(id: string): Promise<void> {
+export async function deletePipeline(id: string, userId?: string): Promise<void> {
   const pipeline = await getPipeline(id);
+  const oldEntity = { ...pipeline };
   await pipelineRepository.softDelete(pipeline.id);
+
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "pipeline",
+      entityId: id,
+      changeType: ChangeType.DELETE,
+      oldEntity,
+      operatorId: userId,
+      changeReason: "删除管线",
+    });
+  } catch {}
 }
 
-export async function listPipelines(filters: PipelineListFilters) {
-  const { page, pageSize, ...queryFilters } = filters;
-  const where: any = {};
-
-  if (queryFilters.type) where.type = queryFilters.type;
-  if (queryFilters.status) where.status = queryFilters.status;
-  if (queryFilters.material) where.material = queryFilters.material;
-  if (queryFilters.departmentId) where.departmentId = queryFilters.departmentId;
-  if (queryFilters.code) where.code = queryFilters.code;
-
+export function buildPipelineQueryBuilder(filters: PipelineListFilters) {
   const qb = pipelineRepository
     .createQueryBuilder("pipeline")
     .leftJoinAndSelect("pipeline.startNode", "startNode")
     .leftJoinAndSelect("pipeline.endNode", "endNode")
     .leftJoinAndSelect("pipeline.department", "department");
 
-  if (queryFilters.name) {
-    qb.andWhere("pipeline.name ILIKE :name", { name: `%${queryFilters.name}%` });
+  if (filters.type) {
+    qb.andWhere("pipeline.type = :type", { type: filters.type });
   }
-
-  if (queryFilters.riskScoreMin !== undefined) {
+  if (filters.status) {
+    qb.andWhere("pipeline.status = :status", { status: filters.status });
+  }
+  if (filters.material) {
+    qb.andWhere("pipeline.material = :material", { material: filters.material });
+  }
+  if (filters.departmentId) {
+    qb.andWhere("pipeline.departmentId = :departmentId", { departmentId: filters.departmentId });
+  }
+  if (filters.code) {
+    qb.andWhere("pipeline.code ILIKE :code", { code: `%${filters.code}%` });
+  }
+  if (filters.name) {
+    qb.andWhere("pipeline.name ILIKE :name", { name: `%${filters.name}%` });
+  }
+  if (filters.riskScoreMin !== undefined) {
     qb.andWhere("pipeline.riskScore >= :riskScoreMin", {
-      riskScoreMin: queryFilters.riskScoreMin,
+      riskScoreMin: filters.riskScoreMin,
+    });
+  }
+  if (filters.riskScoreMax !== undefined) {
+    qb.andWhere("pipeline.riskScore <= :riskScoreMax", {
+      riskScoreMax: filters.riskScoreMax,
     });
   }
 
-  if (queryFilters.riskScoreMax !== undefined) {
-    qb.andWhere("pipeline.riskScore <= :riskScoreMax", {
-      riskScoreMax: queryFilters.riskScoreMax,
-    });
-  }
+  qb.orderBy("pipeline.createdAt", "DESC");
+  return qb;
+}
+
+export async function listPipelines(filters: PipelineListFilters) {
+  const { page, pageSize } = filters;
+  const qb = buildPipelineQueryBuilder(filters);
 
   const { skip, take, page: currentPage, pageSize: size } = getPaginationOptions({
     page,
@@ -429,8 +482,9 @@ export async function getPipelinesByGeometry(
   return { data, total: data.length };
 }
 
-export async function getPipelineStatistics(): Promise<PipelineStatistics> {
-  const allPipelines = await pipelineRepository.find();
+export async function getPipelineStatistics(filters?: Partial<PipelineListFilters>): Promise<PipelineStatistics> {
+  const qb = buildPipelineQueryBuilder(filters || {});
+  const allPipelines = await qb.getMany();
 
   const byType = Object.values(PipelineType).map((type) => {
     const filtered = allPipelines.filter((p: Pipeline) => p.type === type);

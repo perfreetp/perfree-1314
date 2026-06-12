@@ -9,11 +9,14 @@ import {
   WorkOrderPriority,
   AlertSeverity,
   RiskLevel,
+  ChangeType,
+  SharingLevel,
 } from "../types/enums";
 import { throwApiError } from "../utils/response";
 import { PaginationParams, paginateQuery } from "../utils/pagination";
 import { Not, In, Between } from "typeorm";
 import { addProgress } from "./workOrderProgress.service";
+import * as changeHistoryService from "./changeHistory.service";
 
 export interface CreateWorkOrderDto {
   title: string;
@@ -37,6 +40,7 @@ export interface CreateWorkOrderDto {
   requiredPersonnel?: string[];
   workContent?: string;
   attributes?: Record<string, any>;
+  sharingLevel?: SharingLevel;
   remarks?: string;
 }
 
@@ -58,6 +62,7 @@ export interface WorkOrderListFilters extends PaginationParams {
   createdBy?: string;
   startTime?: Date;
   endTime?: Date;
+  sharingLevel?: SharingLevel;
 }
 
 export interface WorkOrderStatistics {
@@ -215,6 +220,17 @@ export async function createWorkOrder(
     userId
   );
 
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "workOrder",
+      entityId: savedWorkOrder.id,
+      changeType: ChangeType.CREATE,
+      newEntity: savedWorkOrder,
+      operatorId: userId,
+      changeReason: "新建工单",
+    });
+  } catch {}
+
   return savedWorkOrder;
 }
 
@@ -246,6 +262,7 @@ export async function updateWorkOrder(
   userId?: string
 ): Promise<WorkOrder> {
   const workOrder = await getWorkOrder(id);
+  const oldEntity = { ...workOrder };
 
   if (workOrder.status === WorkOrderStatus.CLOSED) {
     throwApiError("工单已关闭，无法更新", 400);
@@ -256,12 +273,38 @@ export async function updateWorkOrder(
     updatedBy: userId,
   });
 
-  return await workOrderRepository.save(updated);
+  const saved = await workOrderRepository.save(updated);
+
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "workOrder",
+      entityId: saved.id,
+      changeType: ChangeType.UPDATE,
+      oldEntity,
+      newEntity: saved,
+      operatorId: userId,
+      changeReason: "更新工单",
+    });
+  } catch {}
+
+  return saved;
 }
 
-export async function deleteWorkOrder(id: string): Promise<void> {
+export async function deleteWorkOrder(id: string, userId?: string): Promise<void> {
   const workOrder = await getWorkOrder(id);
+  const oldEntity = { ...workOrder };
   await workOrderRepository.softDelete(workOrder.id);
+
+  try {
+    await changeHistoryService.recordChange({
+      entityType: "workOrder",
+      entityId: id,
+      changeType: ChangeType.DELETE,
+      oldEntity,
+      operatorId: userId,
+      changeReason: "删除工单",
+    });
+  } catch {}
 }
 
 export async function listWorkOrders(filters: WorkOrderListFilters) {
@@ -325,6 +368,11 @@ export async function listWorkOrders(filters: WorkOrderListFilters) {
   } else if (queryFilters.endTime) {
     qb.andWhere("workOrder.createdAt <= :endTime", {
       endTime: queryFilters.endTime,
+    });
+  }
+  if (queryFilters.sharingLevel) {
+    qb.andWhere("workOrder.sharingLevel = :sharingLevel", {
+      sharingLevel: queryFilters.sharingLevel,
     });
   }
 

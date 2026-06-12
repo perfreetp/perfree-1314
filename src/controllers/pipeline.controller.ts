@@ -32,7 +32,8 @@ export async function deletePipeline(req: Request, res: Response) {
   if (!id) {
     throwApiError("管线ID不能为空", 400);
   }
-  await pipelineService.deletePipeline(id);
+  const userId = (req as any).user?.id;
+  await pipelineService.deletePipeline(id, userId);
   return successResponse(res, null, "管线删除成功");
 }
 
@@ -156,7 +157,21 @@ export async function getPipelinesByGeometry(req: Request, res: Response) {
 }
 
 export async function getPipelineStatistics(req: Request, res: Response) {
-  const statistics = await pipelineService.getPipelineStatistics();
+  const filters = {
+    type: req.query.type as any,
+    status: req.query.status as any,
+    material: req.query.material as any,
+    departmentId: req.query.departmentId as string,
+    code: req.query.code as string,
+    name: req.query.name as string,
+    riskScoreMin: req.query.riskScoreMin
+      ? parseFloat(req.query.riskScoreMin as string)
+      : undefined,
+    riskScoreMax: req.query.riskScoreMax
+      ? parseFloat(req.query.riskScoreMax as string)
+      : undefined,
+  };
+  const statistics = await pipelineService.getPipelineStatistics(filters);
   return successResponse(res, statistics, "统计成功");
 }
 

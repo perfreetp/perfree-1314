@@ -53,6 +53,7 @@ export async function listAlertsHandler(req: Request, res: Response) {
     sensorId: req.query.sensorId as string,
     startTime: req.query.startTime ? new Date(req.query.startTime as string) : undefined,
     endTime: req.query.endTime ? new Date(req.query.endTime as string) : undefined,
+    sharingLevel: req.query.sharingLevel as any,
   };
   const result = await listAlerts(filters);
   return successResponse(res, result.data, "查询成功", {

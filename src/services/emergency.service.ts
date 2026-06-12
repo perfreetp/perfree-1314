@@ -506,15 +506,14 @@ export async function completeClosurePlan(planId: string, userId?: string): Prom
   return await planRepository.save(plan);
 }
 
-export async function calculateIsolationArea(
-  dto: CalculateIsolationAreaDto
-): Promise<IsolationAreaResult> {
-  const plan = await getValveClosurePlan(dto.planId);
-  const bufferDistance = dto.bufferDistance || 50;
+async function calculateIsolationGeometry(
+  planId: string,
+  bufferDistance: number = 50
+): Promise<{ geometry: any; area: number; valveCount: number }> {
+  const plan = await getValveClosurePlan(planId);
 
   const steps = await stepRepository.find({
-    where: { planId: dto.planId },
-    relations: ["valve"],
+    where: { planId },
   });
 
   const valvePoints = steps
@@ -524,40 +523,49 @@ export async function calculateIsolationArea(
       return geom?.coordinates || [0, 0];
     });
 
+  let buffer: any = null;
+
   if (valvePoints.length < 2) {
     const incidentGeom = parseGeometry(plan.incidentLocation);
     const incidentPoint = incidentGeom?.coordinates || [0, 0];
-    const buffer = bufferGeometry(
+    buffer = bufferGeometry(
       { type: "Point", coordinates: incidentPoint },
       bufferDistance
     );
-
-    const area = buffer ? calculateArea(buffer.geometry.coordinates) : 0;
-
-    const affectedPipelines = await getPipelinesInArea(buffer);
-    const affectedFacilities = await getFacilitiesInArea(buffer);
-    const estimatedUsers = await estimateAffectedUsersInternal(plan.id);
-
-    return {
-      area,
-      geometry: buffer?.geometry || null,
-      affectedPipelines,
-      affectedFacilities,
-      estimatedUsers,
-    };
+  } else {
+    const hull = createConvexHull(valvePoints);
+    buffer = bufferGeometry(hull, bufferDistance);
   }
 
-  const hull = createConvexHull(valvePoints);
-  const buffer = bufferGeometry(hull, bufferDistance);
-  const area = buffer ? calculateArea(buffer.geometry.coordinates) : 0;
-
-  const affectedPipelines = await getPipelinesInArea(buffer);
-  const affectedFacilities = await getFacilitiesInArea(buffer);
-  const estimatedUsers = await estimateAffectedUsersInternal(plan.id);
+  const area = buffer && buffer.geometry?.coordinates
+    ? calculateArea(buffer.geometry.coordinates)
+    : 0;
 
   return {
-    area,
     geometry: buffer?.geometry || null,
+    area,
+    valveCount: valvePoints.length,
+  };
+}
+
+export async function calculateIsolationArea(
+  dto: CalculateIsolationAreaDto
+): Promise<IsolationAreaResult> {
+  const bufferDistance = dto.bufferDistance || 50;
+
+  const isoGeom = await calculateIsolationGeometry(dto.planId, bufferDistance);
+
+  const bufferFeature = isoGeom.geometry
+    ? { type: "Feature", geometry: isoGeom.geometry }
+    : null;
+
+  const affectedPipelines = await getPipelinesInArea(bufferFeature);
+  const affectedFacilities = await getFacilitiesInArea(bufferFeature);
+  const estimatedUsers = calculateAffectedUsersFromPipelines(affectedPipelines);
+
+  return {
+    area: isoGeom.area,
+    geometry: isoGeom.geometry,
     affectedPipelines,
     affectedFacilities,
     estimatedUsers,
@@ -607,10 +615,20 @@ function createConvexHull(points: number[][]): any {
   return { type: "Polygon", coordinates: [hull] };
 }
 
-async function getPipelinesInArea(geometry: any): Promise<Pipeline[]> {
-  if (!geometry) return [];
+function calculateAffectedUsersFromPipelines(pipelines: Pipeline[]): number {
+  let estimatedUsers = 0;
+  for (const pipeline of pipelines) {
+    const length = pipeline.length || 0;
+    const usersPerKm = (pipeline.attributes as any)?.usersPerKm || 50;
+    estimatedUsers += (length / 1000) * usersPerKm;
+  }
+  return Math.round(estimatedUsers);
+}
 
-  const geomJson = JSON.stringify(geometry.geometry);
+async function getPipelinesInArea(feature: any): Promise<Pipeline[]> {
+  if (!feature || !feature.geometry) return [];
+
+  const geomJson = JSON.stringify(feature.geometry);
 
   return await pipelineRepository
     .createQueryBuilder("pipeline")
@@ -620,10 +638,10 @@ async function getPipelinesInArea(geometry: any): Promise<Pipeline[]> {
     .getMany();
 }
 
-async function getFacilitiesInArea(geometry: any): Promise<Facility[]> {
-  if (!geometry) return [];
+async function getFacilitiesInArea(feature: any): Promise<Facility[]> {
+  if (!feature || !feature.geometry) return [];
 
-  const geomJson = JSON.stringify(geometry.geometry);
+  const geomJson = JSON.stringify(feature.geometry);
 
   return await facilityRepository
     .createQueryBuilder("facility")
@@ -634,34 +652,34 @@ async function getFacilitiesInArea(geometry: any): Promise<Facility[]> {
 }
 
 async function estimateAffectedUsersInternal(planId: string): Promise<number> {
-  const plan = await getValveClosurePlan(planId);
-  const steps = await stepRepository.find({ where: { planId } });
+  const isoGeom = await calculateIsolationGeometry(planId, 30);
 
-  const isolationResult = await calculateIsolationArea({ planId, bufferDistance: 30 });
+  const bufferFeature = isoGeom.geometry
+    ? { type: "Feature", geometry: isoGeom.geometry }
+    : null;
 
-  let estimatedUsers = 0;
-  for (const pipeline of isolationResult.affectedPipelines) {
-    const length = pipeline.length || 0;
-    const diameter = pipeline.diameter || 0.3;
-    const usersPerKm = pipeline.attributes?.usersPerKm || 50;
-    estimatedUsers += (length / 1000) * usersPerKm;
-  }
-
-  return Math.round(estimatedUsers);
+  const affectedPipelines = await getPipelinesInArea(bufferFeature);
+  return calculateAffectedUsersFromPipelines(affectedPipelines);
 }
 
 export async function estimateAffectedUsers(planId: string): Promise<{
   estimatedUsers: number;
   breakdown: Array<{ pipelineId: string; pipelineName: string; users: number }>;
 }> {
-  const isolationResult = await calculateIsolationArea({ planId, bufferDistance: 30 });
+  const isoGeom = await calculateIsolationGeometry(planId, 30);
+
+  const bufferFeature = isoGeom.geometry
+    ? { type: "Feature", geometry: isoGeom.geometry }
+    : null;
+
+  const affectedPipelines = await getPipelinesInArea(bufferFeature);
 
   const breakdown = [];
   let totalUsers = 0;
 
-  for (const pipeline of isolationResult.affectedPipelines) {
+  for (const pipeline of affectedPipelines) {
     const length = pipeline.length || 0;
-    const usersPerKm = pipeline.attributes?.usersPerKm || 50;
+    const usersPerKm = (pipeline.attributes as any)?.usersPerKm || 50;
     const users = Math.round((length / 1000) * usersPerKm);
     totalUsers += users;
     breakdown.push({

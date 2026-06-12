@@ -1,6 +1,6 @@
 import { Entity, Column, ManyToOne, JoinColumn, Index, OneToMany } from "typeorm";
 import { BaseEntity } from "./Base.entity";
-import { WorkOrderStatus, WorkOrderPriority } from "../types/enums";
+import { WorkOrderStatus, WorkOrderPriority, SharingLevel } from "../types/enums";
 import { User } from "./User.entity";
 import { Pipeline } from "./Pipeline.entity";
 import { Facility } from "./Facility.entity";
@@ -117,6 +117,9 @@ export class WorkOrder extends BaseEntity {
 
   @Column({ type: "jsonb", nullable: true })
   attributes: Record<string, any>;
+
+  @Column({ type: "enum", enum: SharingLevel, default: SharingLevel.PRIVATE })
+  sharingLevel: SharingLevel;
 
   @Column({ type: "text", nullable: true })
   remarks: string;
